@@ -3,7 +3,7 @@ use super::*;
 #[derive(Accounts)]
 pub struct UpdateParameters<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }
 
@@ -21,14 +21,14 @@ pub fn update_parameters(ctx: Context<UpdateParameters>, new_price: Option<u64>,
 #[derive(Accounts)]
 pub struct PauseContract<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct UnpauseContract<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }
 

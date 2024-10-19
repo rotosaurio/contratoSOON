@@ -1,29 +1,69 @@
-use super::*;
-use anchor_spl::token::{self, Token, Transfer};
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Token, TokenAccount, Transfer as TokenTransfer};
+use crate::{Presale, PresaleError};
 
-pub fn buy_tokens(ctx: Context<BuyTokens>, amount: u64) -> Result<()> {
-    let sale = &mut ctx.accounts.sale;
+#[derive(Accounts)]
+pub struct BuyTokens<'info> {
+    #[account(mut)]
+    pub presale: Account<'info, Presale>,
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    #[account(mut)]
+    pub buyer_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub token_vault: Account<'info, TokenAccount>,
+    /// CHECK: Este es el cuenta que recibe el pago
+    #[account(mut)]
+    pub treasury: AccountInfo<'info>,
+    /// CHECK: Esta es la autoridad de la venta
+    pub sale_authority: AccountInfo<'info>,
+    pub token_program: Program<'info, Token>,
+}
 
-    require!(!sale.paused, SaleError::SalePaused);
-    require!(sale.whitelist.contains(&ctx.accounts.buyer.key()), SaleError::NotWhitelisted);
-    
-    let allocation = sale.allocations.iter()
+pub fn buy_tokens(ctx: Context<BuyTokens>, presale_id: u64, amount: u64) -> Result<()> {
+    let presale = &mut ctx.accounts.presale;
+
+    // Verificar que el ID de preventa coincide
+    require!(presale.id == presale_id, PresaleError::InvalidPresaleId);
+
+    // Verificar que la preventa no esté pausada
+    require!(!presale.paused, PresaleError::PresalePaused);
+
+    // Verificar que el comprador está en la lista blanca
+    require!(presale.whitelist.contains(&ctx.accounts.buyer.key()), PresaleError::NotWhitelisted);
+
+    // Obtener la asignación para el comprador
+    let allocation = presale.allocations.iter()
         .find(|(pubkey, _)| pubkey == &ctx.accounts.buyer.key())
         .map(|(_, allocation)| *allocation)
         .unwrap_or(0);
-    
-    let buyer_purchase = sale.buyer_purchases.iter()
+
+    // Obtener la compra actual del comprador
+    let buyer_purchase = presale.buyer_purchases.iter()
         .find(|(pubkey, _)| pubkey == &ctx.accounts.buyer.key())
         .map(|(_, purchase)| *purchase)
         .unwrap_or(0);
-    
-    require!(amount <= allocation.saturating_sub(buyer_purchase), SaleError::AllocationExceeded);
-    let cost = sale.price.checked_mul(amount).ok_or(SaleError::CalculationError)?;
 
-    **ctx.accounts.buyer.to_account_info().lamports.borrow_mut() -= cost;
-    **ctx.accounts.treasury.to_account_info().lamports.borrow_mut() += cost;
+    // Verificar que la cantidad no exceda la asignación disponible
+    require!(amount <= allocation.saturating_sub(buyer_purchase), PresaleError::AllocationExceeded);
 
-    let cpi_accounts = Transfer {
+    // Calcular el costo total
+    let cost = presale.price.checked_mul(amount).ok_or(PresaleError::CalculationError)?;
+
+    // Transferir SOL del comprador al treasury
+    {
+        let buyer_info = ctx.accounts.buyer.to_account_info(); // Asigna a una variable temporal
+        let buyer_lamports = &mut **buyer_info.lamports.borrow_mut();
+        *buyer_lamports = buyer_lamports.checked_sub(cost).ok_or(PresaleError::CalculationError)?;
+    }
+    {
+        let treasury_info = ctx.accounts.treasury.to_account_info(); // Asigna a una variable temporal
+        let treasury_lamports = &mut **treasury_info.lamports.borrow_mut();
+        *treasury_lamports = treasury_lamports.checked_add(cost).ok_or(PresaleError::CalculationError)?;
+    }
+
+    // Transferir tokens del token_vault al comprador
+    let cpi_accounts = TokenTransfer {
         from: ctx.accounts.token_vault.to_account_info(),
         to: ctx.accounts.buyer_token_account.to_account_info(),
         authority: ctx.accounts.sale_authority.to_account_info(),
@@ -32,31 +72,27 @@ pub fn buy_tokens(ctx: Context<BuyTokens>, amount: u64) -> Result<()> {
     let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
     token::transfer(cpi_ctx, amount)?;
 
-    sale.tokens_sold = sale.tokens_sold.checked_add(amount).ok_or(SaleError::CalculationError)?;
+    // Antes de añadir una nueva entrada, verificar si hay espacio suficiente
+    require!(
+        {
+            let current_len = presale.buyer_purchases.len() as u64;
+            current_len < presale.max_entries
+        },
+        PresaleError::InsufficientSpace
+    );
     
-    if let Some((_, purchase)) = sale.buyer_purchases.iter_mut().find(|(pubkey, _)| pubkey == &ctx.accounts.buyer.key()) {
-        *purchase = purchase.checked_add(amount).ok_or(SaleError::CalculationError)?;
+    
+    
+
+    // Actualizar el estado de la preventa
+    presale.tokens_sold = presale.tokens_sold.checked_add(amount).ok_or(PresaleError::CalculationError)?;
+
+    if let Some((_, purchase)) = presale.buyer_purchases.iter_mut().find(|(pubkey, _)| pubkey == &ctx.accounts.buyer.key()) {
+        *purchase = purchase.checked_add(amount).ok_or(PresaleError::CalculationError)?;
     } else {
-        sale.buyer_purchases.push((ctx.accounts.buyer.key(), amount));
+        presale.buyer_purchases.push((ctx.accounts.buyer.key(), amount));
     }
 
+    presale.total_raised = presale.total_raised.checked_add(cost).ok_or(PresaleError::CalculationError)?;
     Ok(())
-}
-
-#[derive(Accounts)]
-pub struct BuyTokens<'info> {
-    #[account(mut)]
-    pub sale: Account<'info, Sale>,
-    #[account(mut)]
-    pub buyer: Signer<'info>,
-    #[account(mut)]
-    pub buyer_token_account: Account<'info, token::TokenAccount>,
-    #[account(mut)]
-    pub token_vault: Account<'info, token::TokenAccount>,
-    /// CHECK: This is the treasury account that receives the payment
-    #[account(mut)]
-    pub treasury: AccountInfo<'info>,
-    /// CHECK: This is the sale authority
-    pub sale_authority: AccountInfo<'info>,
-    pub token_program: Program<'info, Token>,
 }

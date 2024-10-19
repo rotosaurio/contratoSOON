@@ -11,6 +11,6 @@ pub fn add_to_whitelist(ctx: Context<AddToWhitelist>, user: Pubkey) -> Result<()
 #[derive(Accounts)]
 pub struct AddToWhitelist<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }

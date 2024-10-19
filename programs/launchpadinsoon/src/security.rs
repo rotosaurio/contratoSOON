@@ -15,13 +15,13 @@ pub fn unpause_sale(ctx: Context<UnpauseSale>) -> Result<()> {
 #[derive(Accounts)]
 pub struct PauseSale<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }
 
 #[derive(Accounts)]
 pub struct UnpauseSale<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }

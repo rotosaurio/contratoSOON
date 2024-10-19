@@ -13,6 +13,6 @@ pub fn set_allocation(ctx: Context<SetAllocation>, user: Pubkey, allocation: u64
 #[derive(Accounts)]
 pub struct SetAllocation<'info> {
     #[account(mut)]
-    pub sale: Account<'info, Sale>,
+    pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
 }
