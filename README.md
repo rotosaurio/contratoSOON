@@ -62,4 +62,7 @@ To run the tests:
 anchor test
 ## Contributing
 
-Contributions are welcome. Please open an issue to discuss major changes before creating a pull request.
+Contributions are welcome. Please open an issue to discuss major changes before creating a pull request. 
+
+
+yo could check the deploy here https://explorer.devnet.soo.network/address/74VT9QxrMB8gWYynpS7m9bxAygWy6tTAqHELeDsVmRNV
