@@ -1,5 +1,5 @@
 use anchor_lang::prelude::*;
-use crate::{Presale, PresaleError};
+use crate::{Presale, PresaleError, GlobalStats};
 
 #[derive(Accounts)]
 pub struct CreateVesting<'info> {
@@ -7,6 +7,8 @@ pub struct CreateVesting<'info> {
     pub sale: Account<'info, Presale>,
     pub admin: Signer<'info>,
     pub user: Signer<'info>,
+    #[account(mut)]
+    pub global_stats: Account<'info, GlobalStats>,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
@@ -23,23 +25,23 @@ impl VestingInfo {
 pub fn create_vesting(ctx: Context<CreateVesting>, amount: u64, release_time: i64) -> Result<()> {
     let sale = &mut ctx.accounts.sale;
     let user_key = ctx.accounts.user.key();
+    let global_stats = &mut ctx.accounts.global_stats;
 
     require!(
         !sale.vestings.iter().any(|(pubkey, _)| pubkey == &user_key),
         PresaleError::VestingAlreadyExists
     );
 
-    // Verificar si hay espacio suficiente antes de añadir una nueva entrada
     require!(
-        {
-            let current_len = sale.vestings.len() as u64;
-            current_len < sale.max_entries
-        },
+        sale.vestings.len() < sale.max_entries as usize,
         PresaleError::InsufficientSpace
     );
-    
-    
-    
+
+    // Verificar si el usuario ha comprado tokens
+    require!(
+        sale.buyer_purchases.iter().any(|(pubkey, _)| pubkey == &user_key),
+        PresaleError::NoPurchaseFound
+    );
 
     sale.vestings.push((
         user_key,
@@ -49,6 +51,12 @@ pub fn create_vesting(ctx: Context<CreateVesting>, amount: u64, release_time: i6
             claimed: false,
         },
     ));
+
+    // Actualizar estadísticas globales
+    if let Some(presale_info) = global_stats.presales.iter_mut().find(|p| p.id == sale.id) {
+        presale_info.total_investors = sale.total_investors as u64;
+    }
+    global_stats.total_investors = global_stats.total_investors.saturating_add(1);
 
     Ok(())
 }

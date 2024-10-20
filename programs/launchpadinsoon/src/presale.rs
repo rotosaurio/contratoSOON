@@ -1,5 +1,6 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Token, TokenAccount, Transfer as TokenTransfer};
+use crate::{GlobalStats, PresaleError, PresaleInfo};
 use crate::vesting::VestingInfo;
 
 #[derive(Accounts)]
@@ -9,15 +10,18 @@ pub struct InitializePresale<'info> {
     #[account(mut)]
     pub creator: Signer<'info>,
     #[account(mut)]
+    pub creator_token_account: Account<'info, TokenAccount>,
+    #[account(mut)]
     pub token_vault: Account<'info, TokenAccount>,
     pub system_program: Program<'info, System>,
     pub token_program: Program<'info, Token>,
     #[account(mut)]
     pub commission_vault: Account<'info, TokenAccount>,
+    #[account(mut)]
+    pub global_stats: Account<'info, GlobalStats>,
 }
 
 #[account]
-#[derive(Default)]
 pub struct Presale {
     pub id: u64,
     pub creator: Pubkey,
@@ -85,6 +89,19 @@ pub fn initialize_presale(
 ) -> Result<()> {
     let presale = &mut ctx.accounts.presale;
     let creator = ctx.accounts.creator.key();
+    let global_stats = &mut ctx.accounts.global_stats;
+
+    // Verificar si el ID ya existe
+    require!(
+        !global_stats.presales.iter().any(|p| p.id == id),
+        PresaleError::DuplicatePresaleId
+    );
+
+    // Verificar que la comisión vault es una cuenta de token
+    require!(
+        ctx.accounts.commission_vault.mint == ctx.accounts.token_program.key(),
+        PresaleError::InvalidCommissionVault
+    );
 
     presale.id = id;
     presale.creator = creator;
@@ -107,6 +124,8 @@ pub fn initialize_presale(
     presale.token_vault = ctx.accounts.token_vault.key();
     presale.claims = Vec::new();
     presale.max_entries = max_entries;
+    presale.raise_token = ctx.accounts.token_program.key();
+    presale.sale_token = ctx.accounts.token_vault.mint;
 
     // Calcular la comisión
     let duration_weeks = (end_time - start_time) / (7 * 24 * 60 * 60) + 1;
@@ -124,7 +143,7 @@ pub fn initialize_presale(
 
     // Transferir los tokens del creador al token_vault
     let cpi_accounts = TokenTransfer {
-        from: ctx.accounts.token_vault.to_account_info(),
+        from: ctx.accounts.creator_token_account.to_account_info(),
         to: ctx.accounts.token_vault.to_account_info(),
         authority: ctx.accounts.creator.to_account_info(),
     };
@@ -133,5 +152,20 @@ pub fn initialize_presale(
         total_tokens,
     )?;
 
+    // Actualizar estadísticas globales
+    require!(
+        global_stats.presales.len() < GlobalStats::MAX_PRESALES,
+        PresaleError::TooManyPresales
+    );
+    global_stats.presales.push(PresaleInfo {
+        id: presale.id,
+        sale_token: presale.sale_token,
+        total_raised: 0,
+        total_investors: 0,
+    });
+    global_stats.total_presales += 1;
+    global_stats.total_investors = global_stats.total_investors.saturating_add(1);
+
     Ok(())
 }
+

@@ -11,6 +11,7 @@ pub mod governance;
 pub mod presale;
 pub mod claim;
 pub mod sale;
+pub mod stats;
 
 use crate::whitelist::*;
 use crate::allocation::*;
@@ -21,6 +22,9 @@ use crate::governance::*;
 use crate::presale::*;
 use crate::claim::*;
 use crate::sale::*;
+use crate::stats::*;
+
+pub use crate::pricing::{GlobalStats, PresaleInfo};
 
 #[program]
 pub mod launchpadinsoon {
@@ -89,6 +93,26 @@ pub mod launchpadinsoon {
     ) -> Result<()> {
         presale::initialize_presale(ctx, id, total_tokens, price, start_time, end_time, vesting_end_time, raise_goal, bump, max_entries)
     }
+
+    pub fn get_presale_stats(ctx: Context<GetPresaleStats>) -> Result<PresaleStats> {
+        stats::get_presale_stats(ctx)
+    }
+
+    pub fn get_user_stats(ctx: Context<GetUserStats>) -> Result<UserStats> {
+        stats::get_user_stats(ctx)
+    }
+
+    pub fn update_global_stats(ctx: Context<UpdateGlobalStats>) -> Result<()> {
+        stats::update_global_stats(ctx)
+    }
+
+    pub fn get_global_stats(ctx: Context<GetGlobalStats>) -> Result<GlobalStats> {
+        stats::get_global_stats(ctx)
+    }
+
+    pub fn initialize_global_stats(ctx: Context<InitializeGlobalStats>) -> Result<()> {
+        stats::initialize_global_stats(ctx)
+    }
 }
 
 #[error_code]
@@ -113,4 +137,16 @@ pub enum PresaleError {
     InsufficientSpace,
     #[msg("Vesting ya existe para este usuario.")]
     VestingAlreadyExists,
+    #[msg("Se ha alcanzado el límite máximo de preventas simultáneas.")]
+    TooManyPresales,
+    #[msg("ID de preventa duplicado.")]
+    DuplicatePresaleId,
+    #[msg("La cuenta de comisión no es válida.")]
+    InvalidCommissionVault,
+    #[msg("La preventa no está activa.")]
+    PresaleNotActive,
+    #[msg("No se encontró ninguna compra para este usuario.")]
+    NoPurchaseFound,
+    #[msg("No se encontró información de vesting para este usuario.")]
+    NoVestingFound,
 }

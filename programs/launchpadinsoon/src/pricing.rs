@@ -12,16 +12,19 @@ pub struct BuyTokens<'info> {
     pub buyer_token_account: Account<'info, TokenAccount>,
     #[account(mut)]
     pub token_vault: Account<'info, TokenAccount>,
-    /// CHECK: Este es el cuenta que recibe el pago
+    /// CHECK: Este es la cuenta que recibe el pago
     #[account(mut)]
     pub treasury: AccountInfo<'info>,
     /// CHECK: Esta es la autoridad de la venta
     pub sale_authority: AccountInfo<'info>,
     pub token_program: Program<'info, Token>,
+    #[account(mut)]
+    pub global_stats: Account<'info, GlobalStats>,
 }
 
 pub fn buy_tokens(ctx: Context<BuyTokens>, presale_id: u64, amount: u64) -> Result<()> {
     let presale = &mut ctx.accounts.presale;
+    let global_stats = &mut ctx.accounts.global_stats;
 
     // Verificar que el ID de preventa coincide
     require!(presale.id == presale_id, PresaleError::InvalidPresaleId);
@@ -52,12 +55,12 @@ pub fn buy_tokens(ctx: Context<BuyTokens>, presale_id: u64, amount: u64) -> Resu
 
     // Transferir SOL del comprador al treasury
     {
-        let buyer_info = ctx.accounts.buyer.to_account_info(); // Asigna a una variable temporal
+        let buyer_info = ctx.accounts.buyer.to_account_info();
         let buyer_lamports = &mut **buyer_info.lamports.borrow_mut();
         *buyer_lamports = buyer_lamports.checked_sub(cost).ok_or(PresaleError::CalculationError)?;
     }
     {
-        let treasury_info = ctx.accounts.treasury.to_account_info(); // Asigna a una variable temporal
+        let treasury_info = ctx.accounts.treasury.to_account_info();
         let treasury_lamports = &mut **treasury_info.lamports.borrow_mut();
         *treasury_lamports = treasury_lamports.checked_add(cost).ok_or(PresaleError::CalculationError)?;
     }
@@ -80,9 +83,6 @@ pub fn buy_tokens(ctx: Context<BuyTokens>, presale_id: u64, amount: u64) -> Resu
         },
         PresaleError::InsufficientSpace
     );
-    
-    
-    
 
     // Actualizar el estado de la preventa
     presale.tokens_sold = presale.tokens_sold.checked_add(amount).ok_or(PresaleError::CalculationError)?;
@@ -94,5 +94,44 @@ pub fn buy_tokens(ctx: Context<BuyTokens>, presale_id: u64, amount: u64) -> Resu
     }
 
     presale.total_raised = presale.total_raised.checked_add(cost).ok_or(PresaleError::CalculationError)?;
+    presale.total_investors = presale.total_investors.saturating_add(1);
+
+    // Actualizar estadísticas globales
+    if let Some(presale_info) = global_stats.presales.iter_mut().find(|p| p.id == presale.id) {
+        presale_info.total_raised = presale.total_raised;
+        presale_info.total_investors = presale.total_investors as u64;
+    }
+    global_stats.total_raised = global_stats.total_raised.checked_add(cost).ok_or(PresaleError::CalculationError)?;
+    global_stats.total_investors = global_stats.total_investors.saturating_add(1);
+
+    // Verificar que la preventa está activa
+    let current_time = Clock::get()?.unix_timestamp;
+    require!(
+        current_time >= presale.start_time && current_time <= presale.end_time,
+        PresaleError::PresaleNotActive
+    );
+
     Ok(())
+}
+
+#[account]
+#[derive(Default)]
+pub struct GlobalStats {
+    pub total_raised: u64,
+    pub total_investors: u64,
+    pub total_presales: u32,
+    pub presales: Vec<PresaleInfo>,
+}
+
+impl GlobalStats {
+    pub const MAX_PRESALES: usize = 100;
+    pub const LEN: usize = 8 + 8 + 4 + (4 + (8 + 32 + 8 + 8) * Self::MAX_PRESALES);
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Default)]
+pub struct PresaleInfo {
+    pub id: u64,
+    pub sale_token: Pubkey,
+    pub total_raised: u64,
+    pub total_investors: u64,
 }
